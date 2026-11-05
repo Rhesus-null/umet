@@ -1,0 +1,12 @@
+[package]
+name = "de"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+age = "0.12.1"
+argh = "0.1.19"
+rpassword = "7.5.4"
+tar = "0.4.46"
+memmap2 = "0.9.12"
+
