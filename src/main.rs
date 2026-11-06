@@ -1,18 +1,20 @@
 use age::secrecy::SecretString;
 use argh::FromArgs;
+use flate2::Compression;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::Cursor;
+use std::io::{Cursor, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::{env, fs};
+use tar::Archive;
 
-/// Tool for folder encryption written in Rust! (=^ ◡ ^=)
+/// Tool for folder/file encryption written in Rust! (=^ ◡ ^=)
 #[derive(FromArgs)]
 struct MainCmd {
-    /// the target into the folder you want to encrypt.
+    /// the target into the folder/file you want to encrypt.
     #[argh(positional)]
     target: PathBuf,
-    /// reverse the tool functionality from encrypting folder to decrypting one.
+    /// reverse the tool functionality from encrypting folder/file to decrypting one.
     #[argh(switch, short = 'r')]
     reverse: bool,
     /// path to output the result.
@@ -29,50 +31,70 @@ fn main() {
     }
 }
 
-
 fn encrypt_mode(args: MainCmd) {
     let target_path = &args.target;
-    if !args.target.is_dir(){
-        eprintln!("'{}' is not a directory", target_path.display());
+    if !target_path.is_dir() {
+        encrypt_single(args);
         return;
     }
-
-    let name = Path::new(target_path.file_name().unwrap_or(OsStr::new("default"))).with_extension("tar.gz.age");
-    let output_path = &args.output_path.unwrap_or(env::current_dir().unwrap()).join(name);
-    let mut tar_gz = Cursor::new(Vec::new());
-    let mut builder = tar::Builder::new(&mut tar_gz);
+    let output_path = get_output(args.output_path, target_path, &[]).with_extension("tar.gz.age");
+    let mut encoder = flate2::write::GzEncoder::new(Cursor::new(Vec::new()), Compression::default());
+    let mut builder = tar::Builder::new(&mut encoder);
     builder.follow_symlinks(false);
 
     let ar =builder.append_dir_all("", target_path);
     if ar.is_err() {
         eprintln!("Error writing tar archive: {}", ar.unwrap_err());
+        return;
     }
     let ir = builder.into_inner();
     if ir.is_err() {
         eprintln!("Error writing tar archive: {}", ir.unwrap_err());
+        return;
     }
-
 
     let passphrase = confirm_password("[Encrypt]");
     let passphrase = SecretString::from(passphrase);
 
 
     let recipient = age::scrypt::Recipient::new(passphrase);
-    let encrypted = age::encrypt(&recipient, tar_gz.into_inner().as_slice());
+    let encrypted = age::encrypt(&recipient, encoder.finish().unwrap().into_inner().as_slice());
     if let Err(e) = encrypted {
         eprintln!("Error encrypting file: {}", e);
+        return;
     } else {
         let encrypted = encrypted.unwrap();
         fs::write(output_path, encrypted).unwrap();
     }
 }
 
+fn encrypt_single(args: MainCmd) {
+    let target_path = &args.target;
+    let output_path = get_output(args.output_path, target_path, &[]).with_extension("age");
+
+    let read = unsafe {memmap2::Mmap::map(&File::open(target_path).unwrap())};
+    if let Err(e) = read {
+        eprintln!("Error reading file: {}", e);
+    } else {
+        let passphrase = confirm_password("[Encrypt]");
+        let passphrase = SecretString::from(passphrase);
+
+
+        let recipient = age::scrypt::Recipient::new(passphrase);
+        let encrypted = age::encrypt(&recipient, &read.unwrap());
+        if let Err(e) = encrypted {
+            eprintln!("Error encrypting file: {}", e);
+            return;
+        } else {
+            let encrypted = encrypted.unwrap();
+            fs::write(output_path, encrypted).unwrap();
+        }
+    }
+}
+
 fn decrypt_mode(args: MainCmd) {
     let target_path = &args.target;
-    let output_path = &args.output_path.unwrap_or(env::current_dir().unwrap()).join(&rse(target_path, &["tar", "gz", "age"]).file_name().unwrap_or(OsStr::new("default")));
-    if !target_path.exists() {
-        fs::create_dir(output_path).unwrap();
-    }
+    let output_path = &get_output(args.output_path, target_path, &["tar", "gz", "age"]);
     let read = unsafe {memmap2::Mmap::map(&File::open(target_path).unwrap())};
     if let Err(e) = read {
         eprintln!("Error reading file: {}", e);
@@ -82,13 +104,33 @@ fn decrypt_mode(args: MainCmd) {
         let identity = age::scrypt::Identity::new(passphrase);
         let decrypted = age::decrypt(&identity, &read.unwrap());
         if let Err(e) = decrypted {
-            eprintln!("Error encrypting file: {}", e);
+            eprintln!("Error decrypting file: {}", e);
         } else {
-            let decrypted = decrypted.unwrap();
-            let mut archive = tar::Archive::new(&*decrypted);
-            archive.unpack(output_path).unwrap();
+            let mut decrypted = Cursor::new(decrypted.unwrap());
+
+            let decoder = flate2::read::GzDecoder::new(&mut decrypted);
+            let mut archive = Archive::new(decoder);
+            if let Err(e) = archive.unpack(&output_path) {
+                if e.kind() == ErrorKind::InvalidInput {
+                    fs::write(rse(output_path, &["age"]), decrypted.into_inner()).unwrap();
+                } else {
+                    eprintln!("Error decrypting file: {}", e);
+                }
+            }
         }
     }
+}
+
+fn get_output(output_path: Option<PathBuf>, target_path: &Path, remove_extension: &[&str]) -> PathBuf {
+    if output_path.is_none() {
+        let current_dir = env::current_dir();
+        if let Ok(current_dir) = current_dir {
+            return current_dir.join(&rse(target_path, remove_extension).file_name().unwrap_or(OsStr::new("default")))
+        } else {
+            panic!("Error getting current directory: '{}'", current_dir.unwrap_err());
+        }
+    }
+    output_path.unwrap().to_path_buf()
 }
 
 fn rse<P: AsRef<Path>>(path: P, extensions_to_remove: &[&str]) -> PathBuf {

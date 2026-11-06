@@ -1,6 +1,6 @@
 [package]
-name = "de"
-version = "0.1.0"
+name = "umet"
+version = "0.1.1"
 edition = "2024"
 
 [dependencies]
@@ -9,4 +9,5 @@ argh = "0.1.19"
 rpassword = "7.5.4"
 tar = "0.4.46"
 memmap2 = "0.9.12"
+flate2 = "1.1.10"
 
