@@ -112,6 +112,9 @@ fn decrypt_mode(args: MainCmd) {
             let mut archive = Archive::new(decoder);
             if let Err(e) = archive.unpack(&output_path) {
                 if e.kind() == ErrorKind::InvalidInput {
+                    if output_path.exists() {
+                        fs::remove_dir(output_path).unwrap();
+                    }
                     fs::write(rse(output_path, &["age"]), decrypted.into_inner()).unwrap();
                 } else {
                     eprintln!("Error decrypting file: {}", e);
