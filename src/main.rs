@@ -149,7 +149,7 @@ fn get_output(output_path: Option<PathBuf>, target_path: &Path) -> PathBuf {
 }
 
 fn remove_extension<const N: usize>(path: &mut PathBuf, extension: [&[u8]; N]){
-    let mut checked = Vec::<&[u8]>::with_capacity(N);
+    let mut checked = Vec::<Box<[u8]>>::with_capacity(N);
     let mut total = 0usize;
 
     while let Some(ext) = path.extension() {
@@ -159,17 +159,14 @@ fn remove_extension<const N: usize>(path: &mut PathBuf, extension: [&[u8]; N]){
 
         let bytes = ext.as_bytes();
         if extension.contains(&bytes) {
-            if !checked.contains(&bytes) {
+            if !checked.contains(&Box::from(bytes)) {
                 total += 1;
-                checked.push(&bytes);
+                checked.push(Box::from(bytes));
+                path.set_extension("");
             } else {
                 break;
             }
         }
-    }
-
-    for _ in 0..checked.len() {
-        path.set_extension("");
     }
 }
 
