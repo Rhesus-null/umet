@@ -6,9 +6,10 @@ use std::fs::File;
 use std::io::Cursor;
 use std::path::{Component, Path, PathBuf};
 use std::{env, fs};
+use std::os::unix::ffi::OsStrExt;
 use tar::Archive;
 
-/// Tool for folder/file encryption written in Rust! (=^ ◡ ^=)
+/// ultimate minimal encryption tool or umet is a tool for file or folder encryption! (=^ ◡ ^=)
 #[derive(FromArgs)]
 struct MainCmd {
     /// the target into the folder/file you want to encrypt.
@@ -101,9 +102,7 @@ fn decrypt_mode(args: MainCmd) {
         } else {
             let decrypted = decrypted.unwrap();
             if infer::is_archive(&decrypted) {
-                output_path.set_extension("");
-                output_path.set_extension("");
-                output_path.set_extension("");
+                remove_extension(&mut output_path, [b"tar", b"gz", b"age"]);
                 let mut decrypted = Cursor::new(decrypted);
 
                 let decoder = flate2::read::GzDecoder::new(&mut decrypted);
@@ -112,7 +111,7 @@ fn decrypt_mode(args: MainCmd) {
                     eprintln!("Error unpacking file: {}", e);
                 }
             } else {
-                output_path.set_extension("");
+                remove_extension(&mut output_path, [b"age"]);
                 if let Err(e) = fs::write(output_path, decrypted) {
                     eprintln!("Error writing file: {}", e);
                 }
@@ -148,6 +147,32 @@ fn get_output(output_path: Option<PathBuf>, target_path: &Path) -> PathBuf {
     }
     o
 }
+
+fn remove_extension<const N: usize>(path: &mut PathBuf, extension: [&[u8]; N]){
+    let mut checked = Vec::<&[u8]>::with_capacity(N);
+    let mut total = 0usize;
+
+    while let Some(ext) = path.extension() {
+        if total == N {
+            break;
+        }
+
+        let bytes = ext.as_bytes();
+        if extension.contains(&bytes) {
+            if !checked.contains(&bytes) {
+                total += 1;
+                checked.push(&bytes);
+            } else {
+                break;
+            }
+        }
+    }
+
+    for _ in 0..checked.len() {
+        path.set_extension("");
+    }
+}
+
 fn confirm_password(prefix: &'static str) -> String {
     let password = rpassword::prompt_password(format!("{} Type Password: ", prefix)).unwrap();
     let mut retyped = rpassword::prompt_password(format!("{} Retype Password: ", prefix)).unwrap();
