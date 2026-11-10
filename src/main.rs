@@ -105,7 +105,7 @@ fn decrypt_mode(args: MainCmd) {
             if infer::is_archive(&decrypted) {
                 remove_extension(&mut output_path, [b"tar", b"gz", b"age"]);
                 if output_path.exists() {
-                    println!("[warning] path: \"{}\" already exists. this may cause problem", output_path.display());
+                    println!("[warning] path: \"{}\" already exists, this may cause problem. you can use '-o' flag to avoid conflict, for further information use '--help'", output_path.display());
                 }
 
                 let mut decrypted = Cursor::new(decrypted);
@@ -118,7 +118,7 @@ fn decrypt_mode(args: MainCmd) {
             } else {
                 remove_extension(&mut output_path, [b"age"]);
                 if output_path.exists() {
-                    println!("[warning] path: \"{}\" already exists. this may cause problem", output_path.display());
+                    println!("[warning] path: \"{}\" already exists, this may cause problem. you can use '-o' flag to avoid conflict, for further information use '--help'", output_path.display());
                 }
 
                 if let Err(e) = fs::write(output_path, decrypted) {
@@ -141,7 +141,17 @@ fn get_output(output_path: Option<PathBuf>, target_path: &Path) -> PathBuf {
     let o = output_path.unwrap().to_path_buf();
     if let Some(c) = o.components().last() {
         return match c {
-            Component::Normal(_) => o,
+            Component::Normal(_) => {
+                if o.components().count() == 1 {
+                    let current_dir = env::current_dir();
+                    if let Ok(current_dir) = current_dir {
+                        return current_dir.join(o)
+                    } else {
+                        panic!("Error getting current directory: {}", current_dir.unwrap_err());
+                    }
+                }
+                o
+            },
             Component::RootDir | Component::ParentDir | Component::CurDir => {
                 o.join(&target_path.file_name().unwrap_or(OsStr::new("default")))
             }
