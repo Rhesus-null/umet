@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::Cursor;
 use std::path::{Component, Path, PathBuf};
 use std::{env, fs};
+use std::collections::HashMap;
 use std::os::unix::ffi::OsStrExt;
 use tar::Archive;
 
@@ -103,6 +104,10 @@ fn decrypt_mode(args: MainCmd) {
             let decrypted = decrypted.unwrap();
             if infer::is_archive(&decrypted) {
                 remove_extension(&mut output_path, [b"tar", b"gz", b"age"]);
+                if output_path.exists() {
+                    println!("[warning] path: \"{}\" already exists. this may cause problem", output_path.display());
+                }
+
                 let mut decrypted = Cursor::new(decrypted);
 
                 let decoder = flate2::read::GzDecoder::new(&mut decrypted);
@@ -112,6 +117,10 @@ fn decrypt_mode(args: MainCmd) {
                 }
             } else {
                 remove_extension(&mut output_path, [b"age"]);
+                if output_path.exists() {
+                    println!("[warning] path: \"{}\" already exists. this may cause problem", output_path.display());
+                }
+
                 if let Err(e) = fs::write(output_path, decrypted) {
                     eprintln!("Error writing file: {}", e);
                 }
@@ -126,7 +135,7 @@ fn get_output(output_path: Option<PathBuf>, target_path: &Path) -> PathBuf {
         if let Ok(current_dir) = current_dir {
             return current_dir.join(&target_path.file_name().unwrap_or(OsStr::new("default")))
         } else {
-            panic!("Error getting current directory: '{}'", current_dir.unwrap_err());
+            panic!("Error getting current directory: {}", current_dir.unwrap_err());
         }
     }
     let o = output_path.unwrap().to_path_buf();
@@ -149,25 +158,67 @@ fn get_output(output_path: Option<PathBuf>, target_path: &Path) -> PathBuf {
 }
 
 fn remove_extension<const N: usize>(path: &mut PathBuf, extension: [&[u8]; N]){
-    let mut checked = Vec::<Box<[u8]>>::with_capacity(N);
-    let mut total = 0usize;
+    let mut checked = HashMap::<Box<[u8]>, usize>::with_capacity(N);
+    let mut s_total = 0usize;
 
     while let Some(ext) = path.extension() {
-        if total == N {
+        if s_total == N {
             break;
         }
 
         let bytes = ext.as_bytes();
         if extension.contains(&bytes) {
-            if !checked.contains(&Box::from(bytes)) {
-                total += 1;
-                checked.push(Box::from(bytes));
-                path.set_extension("");
+            let any = checked.get_mut(&Box::from(bytes));
+            if let Some(total) = any {
+                if *total < get_total(extension, bytes) {
+                    s_total += 1;
+                    *total += 1;
+                    path.set_extension("");
+                } else {
+                    break;
+                }
             } else {
-                break;
+                s_total += 1;
+                checked.insert(Box::from(bytes), 1);
+                path.set_extension("");
             }
+        } else {
+            break;
         }
     }
+}
+const fn get_total<const N: usize>(data: [&[u8]; N], any: &[u8]) -> usize {
+    let mut total = 0usize;
+    let mut indexer = 0usize;
+    loop {
+        if indexer >= N {
+            break;
+        }
+        if equal(&data[indexer], any) {
+            total += 1;
+        }
+        indexer += 1;
+    }
+    total
+}
+
+const fn equal(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+
+    let mut indexer = 0usize;
+    loop {
+        if indexer >= left.len() {
+            break;
+        }
+        if left[indexer] != right[indexer] {
+            return false;
+        }
+        indexer += 1;
+    }
+    true
+
 }
 
 fn confirm_password(prefix: &'static str) -> String {
